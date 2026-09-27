@@ -1014,6 +1014,7 @@ function startNewOrderWatcher(){
       toast('🛒 নতুন অর্ডার এসেছে! ('+(latest.name||'')+')','var(--green,#22C55E)');
       playNewOrderSound();
       // Add the new order to the dashboard list without re-reading everything
+      if(!dashboardOrdersSample.some(o=>o._docId===latestDoc.id)) bumpDashboardTotals(latest);
       dashboardOrdersSample = [{...latest,_docId:latestDoc.id}].concat(dashboardOrdersSample.filter(o=>o._docId!==latestDoc.id)).slice(0,DASHBOARD_SAMPLE_LIMIT);
       const active=document.querySelector('.page.active');
       const pid = active ? active.id.replace('pg-','') : '';
@@ -1159,6 +1160,7 @@ function enterAdminPanel(d){
   startNewOrderWatcher();
   document.getElementById('login-page').style.display='none';
   document.getElementById('admin-panel').style.display='block';
+  invalidateDashboardTotals(); // always fresh numbers on login / page reload
   loadDashboard();
   loadProducts().then(()=>{
     updateCourierSelects();
@@ -1297,6 +1299,24 @@ function loadDashboard(force){
 }
 
 function refreshDashboardTotals(){ loadDashboardTrueCounts(true); toast('হিসাব আপডেট হচ্ছে...'); }
+
+// Forget saved dashboard numbers so the next dashboard visit fetches fresh ones
+function invalidateDashboardTotals(){
+  dashboardTrueTotals = null;
+  dashboardTrueCountsLoadedAt = 0;
+  dashboardLastLoadedAt = 0;
+  try{ localStorage.removeItem('lv_dash_totals'); }catch(e){}
+}
+
+// A new order arrived → add it to the saved totals locally (no extra Firebase reads)
+function bumpDashboardTotals(o){
+  if(!dashboardTrueTotals || !o || o.status==='Incomplete') return;
+  const t = dashboardTrueTotals;
+  t.total = (t.total||0) + 1;
+  if(o.status && t[o.status] !== undefined) t[o.status]++;
+  if(o.status==='Completed' || o.status==='Delivered') t.revenue = (t.revenue||0) + (o.total||0);
+  try{ localStorage.setItem('lv_dash_totals', JSON.stringify({t,at:dashboardTrueCountsLoadedAt})); }catch(e){}
+}
 
 let totalsLoading=false;
 function loadDashboardTrueCounts(force){
@@ -1532,6 +1552,7 @@ function updateOS(){
     const pid = active ? active.id.replace('pg-','') : '';
     if(pid==='incomplete') renderIncomplete();
     else renderOrders();
+    invalidateDashboardTotals();
     cm('edit-status-modal'); toast('Updated! ✅');
   }).catch(err=>{ console.error('Update status error:',err); toast('Update করতে সমস্যা হয়েছে','var(--red)'); });
 }
@@ -1681,6 +1702,7 @@ function saveFullOrderEdit(){
     ORDERS_COL.add(newOrder).then(()=>{
       creatingNewOrder = false;
       cm('edit-order-modal');
+      invalidateDashboardTotals();
       toast('নতুন অর্ডার তৈরি হয়েছে! ✅ ' + newOrder.invoice);
       const active = document.querySelector('.page.active');
       if(!active || active.id!=='pg-orders'){ sp('orders','all'); }
@@ -1699,6 +1721,7 @@ function saveFullOrderEdit(){
     if(pid2==='incomplete') renderIncomplete();
     else renderOrders();
     cm('edit-order-modal');
+    invalidateDashboardTotals();
     toast('অর্ডার আপডেট হয়েছে! ✅');
   }).catch(err=>{ console.error('Full order edit error:', err); toast('আপডেট করতে সমস্যা হয়েছে','var(--red)'); });
 }
@@ -1712,6 +1735,7 @@ function delOrder(docId){
     const pid = active ? active.id.replace('pg-','') : '';
     if(pid==='incomplete') renderIncomplete();
     else renderOrders();
+    invalidateDashboardTotals();
     toast('Deleted','var(--red)');
   }).catch(err=>{ console.error('Delete order error:',err); toast('Delete করতে সমস্যা হয়েছে','var(--red)'); });
 }
@@ -1731,6 +1755,7 @@ function bulkStatus(){
   batch.commit().then(()=>{
     ids.forEach(docId=>{ const o=findLoadedOrder(docId); if(o) o.status=s; });
     renderOrders();
+    invalidateDashboardTotals();
     toast(ids.length+' orders updated! ✅');
   }).catch(err=>{ console.error('Bulk update error:',err); toast('Bulk update করতে সমস্যা হয়েছে','var(--red)'); });
 }
