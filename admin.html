@@ -872,6 +872,46 @@ const PRODUCTS_SNAPSHOT_DOC = db.collection('lovevibes').doc('products-snapshot'
 const CLOUDINARY_UPLOAD_URL = "https://api.cloudinary.com/v1_1/"+CLOUDINARY_CLOUD_NAME+"/image/upload";
 const CLOUDINARY_VIDEO_UPLOAD_URL = "https://api.cloudinary.com/v1_1/"+CLOUDINARY_CLOUD_NAME+"/video/upload";
 
+// ══════════════════════════════════════════
+// SUPABASE STORAGE — chobi/video upload ekhon ekhane (Cloudinary block thaka obosthay)
+// anon key public-er jonno banano, eta browser e thakle shomossha nai
+// ══════════════════════════════════════════
+const SUPABASE_URL = "https://qerozvlbubwieomsufqh.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFlcm96dmxidWJ3aWVvbXN1ZnFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4NzQwNzIsImV4cCI6MjA5OTQ1MDA3Mn0.V2yXuLxamj1GPK8yh6b4j3-CnJmUozMb1IybltYalYY";
+const SUPABASE_BUCKET = "products";
+
+function sbPath(kind, name){
+  const ext = ((name||'').split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,5) || 'bin';
+  return kind+'/'+Date.now()+'-'+Math.random().toString(36).slice(2,8)+'.'+ext;
+}
+function sbPublicUrl(path){ return SUPABASE_URL+'/storage/v1/object/public/'+SUPABASE_BUCKET+'/'+path; }
+function sbErrMsg(status, text){
+  let m=''; try{ const j=JSON.parse(text||'{}'); m=j.message||j.error||j.msg||''; }catch(e){ m=text||''; }
+  if(/row-level security|policy|unauthorized|403/i.test(m+status)) return 'Supabase policy ঠিক নেই — Storage policy (INSERT for anon) add করুন';
+  if(/bucket not found|404/i.test(m+status)) return 'Supabase-এ "'+SUPABASE_BUCKET+'" bucket পাওয়া যায়নি';
+  if(/too large|413|exceeded/i.test(m+status)) return 'ফাইল অনেক বড় (Supabase free limit 50MB)';
+  return m || ('Upload failed ('+status+')');
+}
+// Upload a File/Blob to Supabase Storage, resolve with public URL. onProgress(0-100) optional.
+function sbUpload(blobOrFile, kind, name, contentType, onProgress){
+  return new Promise((resolve,reject)=>{
+    const path = sbPath(kind, name);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', SUPABASE_URL+'/storage/v1/object/'+SUPABASE_BUCKET+'/'+path);
+    xhr.setRequestHeader('apikey', SUPABASE_ANON_KEY);
+    xhr.setRequestHeader('Authorization', 'Bearer '+SUPABASE_ANON_KEY);
+    xhr.setRequestHeader('Content-Type', contentType || blobOrFile.type || 'application/octet-stream');
+    xhr.setRequestHeader('Cache-Control', 'max-age=31536000');
+    if(onProgress) xhr.upload.onprogress = e=>{ if(e.lengthComputable) onProgress(Math.round((e.loaded/e.total)*100)); };
+    xhr.onload = ()=>{
+      if(xhr.status>=200 && xhr.status<300) resolve(sbPublicUrl(path));
+      else { console.error('Supabase upload error:', xhr.status, xhr.responseText); reject(new Error(sbErrMsg(xhr.status, xhr.responseText))); }
+    };
+    xhr.onerror = ()=>reject(new Error('নেট সমস্যা — আপলোড হয়নি'));
+    xhr.send(blobOrFile);
+  });
+}
+
 const SITE_URL = "https://lovevibesbd.com";
 const SHOP_PHONE = "01402060439";
 const SHOP_EMAIL = "lovevibes1134@gmail.com";
@@ -912,13 +952,7 @@ function uploadResizedImage(file,maxDim,quality){
         ctx.drawImage(img,0,0,w,h);
         canvas.toBlob(blob=>{
           if(!blob) return reject(new Error('Convert failed'));
-          const fd=new FormData();
-          fd.append('file',blob);
-          fd.append('upload_preset',CLOUDINARY_UPLOAD_PRESET);
-          fetch(CLOUDINARY_UPLOAD_URL,{method:'POST',body:fd})
-            .then(r=>r.json())
-            .then(d=>{ if(d.secure_url) resolve(d.secure_url); else reject(new Error((d.error&&d.error.message)||'Upload failed')); })
-            .catch(reject);
+          sbUpload(blob,'img','image.jpg','image/jpeg').then(resolve).catch(reject);
         },'image/jpeg',quality||0.85);
       };
       img.src=e.target.result;
@@ -2010,40 +2044,21 @@ function handleProductVideoUpload(input){
   if(file.size > 100*1024*1024){ toast('ভিডিও ১০০MB-এর বেশি — কম্প্রেস করে আবার চেষ্টা করুন','var(--red)'); return; }
   pmVideoUploading = true;
   renderVideoSlot();
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
-  const xhr = new XMLHttpRequest();
-  xhr.open('POST', CLOUDINARY_VIDEO_UPLOAD_URL);
-  xhr.upload.onprogress = e=>{
-    if(!e.lengthComputable) return;
+  if(file.size > 50*1024*1024){ pmVideoUploading=false; renderVideoSlot(); toast('Supabase free-তে ভিডিও সর্বোচ্চ 50MB — ছোট করুন বা YouTube link দিন','var(--red)'); return; }
+  sbUpload(file,'video',file.name,file.type,pct=>{
     const el = document.getElementById('pm-video-progress');
-    if(el) el.textContent = Math.round((e.loaded/e.total)*100) + '%';
-  };
-  xhr.onload = ()=>{
+    if(el) el.textContent = pct + '%';
+  }).then(url=>{
     pmVideoUploading = false;
-    try{
-      const data = JSON.parse(xhr.responseText||'{}');
-      if(xhr.status>=200 && xhr.status<300 && data.secure_url){
-        pmVideoUrl = data.secure_url;
-        const yt = document.getElementById('pm-video-yt'); if(yt) yt.value='';
-        renderVideoSlot();
-        toast('ভিডিও আপলোড হয়েছে ✅');
-      } else {
-        const msg = (data.error && data.error.message) ? data.error.message : ('Upload failed ('+xhr.status+')');
-        renderVideoSlot();
-        if(/resource_?type|preset|not allowed/i.test(msg)) toast('Cloudinary preset-এ Video allow করা নেই। Preset → Resource type: Auto করুন।','var(--red)');
-        else toast('ভিডিও আপলোড ফেইল: '+msg,'var(--red)');
-        console.error('Cloudinary video upload error:', data);
-      }
-    }catch(err){
-      renderVideoSlot();
-      toast('ভিডিও আপলোড ফেইল','var(--red)');
-      console.error(err);
-    }
-  };
-  xhr.onerror = ()=>{ pmVideoUploading = false; renderVideoSlot(); toast('নেট সমস্যা — ভিডিও আপলোড ফেইল','var(--red)'); };
-  xhr.send(fd);
+    pmVideoUrl = url;
+    const yt = document.getElementById('pm-video-yt'); if(yt) yt.value='';
+    renderVideoSlot();
+    toast('ভিডিও আপলোড হয়েছে ✅');
+  }).catch(err=>{
+    pmVideoUploading = false;
+    renderVideoSlot();
+    toast('ভিডিও আপলোড ফেইল: '+((err&&err.message)||'unknown'),'var(--red)');
+  });
 }
 
 document.addEventListener('input', e=>{
@@ -2444,18 +2459,13 @@ function handleLogoUpload(input){
   const box = document.getElementById('logo-preview');
   if(box) box.innerHTML = '<div style="font-family:\'Hind Siliguri\';">⏳ Logo আপলোড হচ্ছে...</div>';
   if(btn) btn.style.opacity = '0.5';
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
-  fetch(CLOUDINARY_UPLOAD_URL, {method:'POST', body:fd})
-    .then(r=>r.json())
-    .then(data=>{
-      if(!data.secure_url) throw new Error((data.error && data.error.message) || 'Upload failed');
-      settings.logo_url = data.secure_url;
+  sbUpload(file,'logo',file.name,file.type)
+    .then(url=>{
+      settings.logo_url = url;
       return saveAll();
     })
     .then(()=>{ renderLogoPreview(); applyAdminLogo(); toast('Logo আপডেট হয়েছে ✅ Website-এ দেখুন'); })
-    .catch(err=>{ console.error('Logo upload error:', err); renderLogoPreview(); toast('Logo আপলোড করতে সমস্যা হয়েছে','var(--red)'); })
+    .catch(err=>{ console.error('Logo upload error:', err); renderLogoPreview(); toast('Logo আপলোড হয়নি: '+((err&&err.message)||'unknown'),'var(--red)'); })
     .finally(()=>{ if(btn) btn.style.opacity = '1'; });
 }
 
