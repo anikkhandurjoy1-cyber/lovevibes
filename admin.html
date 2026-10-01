@@ -846,8 +846,8 @@ const firebaseConfig = {
 // CLOUDINARY — ⚠️ এখানে নিজের Cloud name আর Unsigned upload preset দিন
 // (Preset → Signing mode: Unsigned, Resource type: Auto — ভিডিওর জন্য দরকার)
 // ══════════════════════════════════════════
-const CLOUDINARY_CLOUD_NAME = "gfh1rg3u";
-const CLOUDINARY_UPLOAD_PRESET = "lovevibes";
+const CLOUDINARY_CLOUD_NAME = "lovevibes";
+const CLOUDINARY_UPLOAD_PRESET = "gfh1rg3u";
 
 const CONFIG_MISSING = firebaseConfig.apiKey.indexOf('PASTE_')===0;
 
@@ -1897,7 +1897,7 @@ function handleImgUpload(input,slotIdx){
     toast('ছবি আপলোড হয়েছে ✅');
   }).catch(err=>{
     console.error(err);
-    toast('ছবি আপলোড করতে সমস্যা — Cloudinary preset চেক করুন','var(--red)');
+    toast('ছবি আপলোড হয়নি: '+((err&&err.message)||'unknown'),'var(--red)');
   }).finally(()=>{ pmImgUploading--; renderImgSlots(); });
 }
 
@@ -2191,7 +2191,7 @@ function handleCatImgUpload(input){
   }).catch(err=>{
     console.error(err);
     cImgUploading=false; renderCatImgPrev();
-    toast('ছবি আপলোড করতে সমস্যা হয়েছে','var(--red)');
+    toast('ছবি আপলোড হয়নি: '+((err&&err.message)||'unknown'),'var(--red)');
   });
 }
 
@@ -2347,7 +2347,7 @@ function handleBannerImgUpload(input,slotIdx){
     toast('ছবি আপলোড হয়েছে ✅');
   }).catch(err=>{
     console.error(err);
-    toast('ছবি আপলোড করতে সমস্যা হয়েছে','var(--red)');
+    toast('ছবি আপলোড হয়নি: '+((err&&err.message)||'unknown'),'var(--red)');
   }).finally(()=>{ bImgUploading--; renderBannerImgSlots(); });
 }
 
@@ -2651,7 +2651,7 @@ document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',function(
 
 function toast(msg,bg='var(--green)'){
   const el=document.getElementById('toast'); el.textContent=msg; el.style.background=bg; el.style.display='block';
-  clearTimeout(toast._t); toast._t=setTimeout(()=>el.style.display='none',2800);
+  clearTimeout(toast._t); toast._t=setTimeout(()=>el.style.display='none',msg.length>60?7000:2800);
 }
 
 function updDate(){
